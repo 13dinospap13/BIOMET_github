@@ -1085,7 +1085,7 @@ thermos_gui <- function() {
       last_run_scripts <- shiny::reactiveVal(NULL)
 
       session$onFlushed(function() {
-        saved <- cached_input_paths()
+        saved <- shiny::isolate(cached_input_paths())
         for (input_id in cached_input_ids) {
           if (nzchar(saved[[input_id]])) {
             shiny::updateTextInput(session, input_id, value = saved[[input_id]])
@@ -1531,7 +1531,7 @@ thermos_gui <- function() {
       })
 
       session$onSessionEnded(function() {
-        task <- current_task()
+        task <- shiny::isolate(current_task())
         if (!is.null(task) && task$job$is_alive()) {
           task$job$kill()
         }
