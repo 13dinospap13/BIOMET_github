@@ -142,3 +142,188 @@ thermos_check_inputs <- function(lc_path = NULL,
 
   list(ok = ok, messages = messages, details = details)
 }
+
+thermos_required_landcover_layers <- function() {
+  c(
+    "landcover",
+    "albedo",
+    "emis",
+    "z0",
+    "et_scale",
+    "lai",
+    "canopy_cover",
+    "k_ext",
+    "gai",
+    "wall_albedo",
+    "wall_emis"
+  )
+}
+
+thermos_find_suffix_file <- function(dir_path, suffix, label) {
+  files <- list.files(dir_path, pattern = "\\.tif$", full.names = TRUE)
+  matches <- files[vapply(
+    files,
+    function(path) identical(thermos_extract_suffix(path), suffix),
+    logical(1)
+  )]
+
+  if (length(matches) == 0) {
+    return(NULL)
+  }
+  if (length(matches) > 1) {
+    stop(
+      "Multiple ", label, " rasters match plot '", suffix, "': ",
+      paste(basename(matches), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  matches[[1]]
+}
+
+thermos_compare_raster_geometry <- function(reference_path, candidate_path, label) {
+  reference <- terra::rast(reference_path)
+  candidate <- terra::rast(candidate_path)
+  same_geometry <- isTRUE(terra::compareGeom(
+    reference,
+    candidate,
+    crs = TRUE,
+    ext = TRUE,
+    rowcol = TRUE,
+    res = TRUE,
+    stopOnError = FALSE
+  ))
+
+  if (!same_geometry) {
+    stop(
+      label, " is not aligned with DEM '", basename(reference_path),
+      "': ", basename(candidate_path),
+      ". CRS, extent, resolution, rows, and columns must match.",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+thermos_check_raster_compatibility <- function(reference_path, candidate_path, label) {
+  reference <- terra::rast(reference_path)
+  candidate <- terra::rast(candidate_path)
+
+  if (!isTRUE(terra::same.crs(reference, candidate))) {
+    stop(
+      label, " has a different CRS from DEM '", basename(reference_path),
+      "': ", basename(candidate_path), ".",
+      call. = FALSE
+    )
+  }
+
+  ref_ext <- terra::ext(reference)
+  candidate_ext <- terra::ext(candidate)
+  overlaps <- max(terra::xmin(ref_ext), terra::xmin(candidate_ext)) <
+    min(terra::xmax(ref_ext), terra::xmax(candidate_ext)) &&
+    max(terra::ymin(ref_ext), terra::ymin(candidate_ext)) <
+    min(terra::ymax(ref_ext), terra::ymax(candidate_ext))
+
+  if (!overlaps) {
+    stop(
+      label, " does not overlap DEM '", basename(reference_path),
+      "': ", basename(candidate_path), ".",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
+}
+
+thermos_validate_existing_thermal_inputs <- function(dem_dir,
+                                                     dsm_dir,
+                                                     svf_dir,
+                                                     lc_dir,
+                                                     met_xlsx,
+                                                     plot_suffix = "__auto__") {
+  thermos_dir_must_exist(dem_dir, "DEM")
+  thermos_dir_must_exist(dsm_dir, "DSM")
+  thermos_dir_must_exist(svf_dir, "SVF")
+  thermos_dir_must_exist(lc_dir, "Rasterized land-cover")
+
+  if (!file.exists(met_xlsx)) {
+    stop("Meteorological Excel file not found: ", met_xlsx, call. = FALSE)
+  }
+
+  met_cols <- names(readxl::read_xlsx(met_xlsx, n_max = 0))
+  required_met_cols <- c("date", "hour_utc", "Ta", "Td", "u10", "v10", "ssrd", "strd", "slhf")
+  missing_met_cols <- setdiff(required_met_cols, met_cols)
+  if (length(missing_met_cols) > 0) {
+    stop(
+      "Meteorological Excel is missing columns: ",
+      paste(missing_met_cols, collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  plot_suffixes <- thermos_resolve_plot_suffixes(
+    plot_suffix = plot_suffix,
+    dem_dir = dem_dir,
+    dsm_dir = dsm_dir,
+    svf_dir = svf_dir,
+    lc_dir = lc_dir
+  )
+  if (length(plot_suffixes) == 0) {
+    stop("No matching plots were detected in the supplied raster folders.", call. = FALSE)
+  }
+
+  required_layers <- thermos_required_landcover_layers()
+  details <- vector("list", length(plot_suffixes))
+  names(details) <- plot_suffixes
+
+  for (suffix in plot_suffixes) {
+    dem_path <- thermos_find_suffix_file(dem_dir, suffix, "DEM")
+    dsm_path <- thermos_find_suffix_file(dsm_dir, suffix, "DSM")
+    svf_path <- file.path(svf_dir, paste0("svf_", suffix, ".tif"))
+    layer_paths <- stats::setNames(
+      file.path(lc_dir, paste0(required_layers, "_", suffix, ".tif")),
+      required_layers
+    )
+
+    missing <- c(
+      if (is.null(dem_path)) paste0("DEM (*_", suffix, ".tif)") else character(),
+      if (is.null(dsm_path)) paste0("DSM (*_", suffix, ".tif)") else character(),
+      if (!file.exists(svf_path)) basename(svf_path) else character(),
+      basename(layer_paths[!file.exists(layer_paths)])
+    )
+    if (length(missing) > 0) {
+      stop(
+        "Plot '", suffix, "' is incomplete. Missing: ",
+        paste(missing, collapse = ", "),
+        call. = FALSE
+      )
+    }
+
+    thermos_check_raster_compatibility(dem_path, dsm_path, "DSM")
+    thermos_check_raster_compatibility(dem_path, svf_path, "SVF")
+    for (layer_name in names(layer_paths)) {
+      thermos_compare_raster_geometry(
+        dem_path,
+        layer_paths[[layer_name]],
+        paste("Land-cover layer", layer_name)
+      )
+    }
+
+    details[[suffix]] <- list(
+      dem = dem_path,
+      dsm = dsm_path,
+      svf = svf_path,
+      landcover = layer_paths
+    )
+  }
+
+  list(
+    ok = TRUE,
+    plot_suffixes = plot_suffixes,
+    messages = paste(
+      "Existing rasters are valid for",
+      length(plot_suffixes),
+      "plot(s):",
+      paste(plot_suffixes, collapse = ", ")
+    ),
+    details = details
+  )
+}

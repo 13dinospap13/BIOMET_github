@@ -495,19 +495,16 @@ thermos_thermal_comfort <- function(dem_dir,
                                    Clo = 0.9,
                                    ht = 1.75,
                                    mbody = 75) {
-  thermos_dir_must_exist(dem_dir, "DEM")
-  thermos_dir_must_exist(dsm_dir, "DSM")
-  thermos_dir_must_exist(svf_dir, "SVF")
-  thermos_dir_must_exist(lc_dir, "Rasterized land-cover")
-  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-
-  plot_suffixes <- thermos_resolve_plot_suffixes(
-    plot_suffix = plot_suffix,
+  validation <- thermos_validate_existing_thermal_inputs(
     dem_dir = dem_dir,
     dsm_dir = dsm_dir,
     svf_dir = svf_dir,
-    lc_dir = lc_dir
+    lc_dir = lc_dir,
+    met_xlsx = met_xlsx,
+    plot_suffix = plot_suffix
   )
+  plot_suffixes <- validation$plot_suffixes
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
   met_cols <- names(readxl::read_xlsx(met_xlsx, n_max = 0))
   met_df <- as.data.frame(readxl::read_xlsx(met_xlsx, skip = 2, col_names = met_cols))

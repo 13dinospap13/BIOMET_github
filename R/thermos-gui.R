@@ -904,8 +904,33 @@ thermos_gui <- function() {
             ),
             shiny::tags$div(
               class = "thermos-section-body",
-              path_input_ui("lc_path", "lc_path_browse", "Land cover (GeoPackage)"),
-              path_input_ui("obs_path", "obs_path_browse", "Obstacles (GeoPackage)"),
+              shiny::radioButtons(
+                "workflow_mode",
+                "Analysis workflow",
+                choices = c(
+                  "Full pipeline" = "full",
+                  "Thermal from existing rasters" = "thermal_only"
+                ),
+                selected = "full"
+              ),
+              shiny::conditionalPanel(
+                condition = "input.workflow_mode == 'full'",
+                path_input_ui("lc_path", "lc_path_browse", "Land cover (GeoPackage)"),
+                path_input_ui("obs_path", "obs_path_browse", "Obstacles (GeoPackage)")
+              ),
+              shiny::conditionalPanel(
+                condition = "input.workflow_mode == 'thermal_only'",
+                path_input_ui(
+                  "existing_lc_dir",
+                  "existing_lc_dir_browse",
+                  "Rasterized land-cover folder"
+                ),
+                path_input_ui(
+                  "existing_svf_dir",
+                  "existing_svf_dir_browse",
+                  "SVF folder"
+                )
+              ),
               path_input_ui("dem_dir", "dem_dir_browse", "DEM"),
               path_input_ui("dsm_dir", "dsm_dir_browse", "DSM"),
               path_input_ui("met_xlsx", "met_xlsx_browse", "Meteorological Excel"),
@@ -931,11 +956,19 @@ thermos_gui <- function() {
                 ),
                 selected = "__auto__"
               ),
+              shiny::conditionalPanel(
+                condition = "input.workflow_mode == 'full'",
+                shiny::tags$h4("SVF parameters"),
+                shiny::tags$div(
+                  class = "thermos-param-grid",
+                  shiny::numericInput("num_directions", "Number of directions", value = 72, min = 8),
+                  shiny::numericInput("max_distance", "Maximum search distance (m)", value = 30, min = 1),
+                  shiny::numericInput("observer_height", "Observer height for SVF (m)", value = 1.5, min = 0.1)
+                )
+              ),
+              shiny::tags$h4("Thermal parameters"),
               shiny::tags$div(
                 class = "thermos-param-grid",
-                shiny::numericInput("num_directions", "Number of directions", value = 72, min = 8),
-                shiny::numericInput("max_distance", "Maximum search distance (m)", value = 30, min = 1),
-                shiny::numericInput("observer_height", "Observer height for SVF (m)", value = 1.5, min = 0.1),
                 shiny::numericInput("Met", "Metabolic rate (W/m2)", value = 80, min = 1),
                 shiny::numericInput("Clo", "Clothing insulation (clo)", value = 0.9, min = 0),
                 shiny::numericInput("ht", "Body height (m)", value = 1.75, min = 0.5),
@@ -953,13 +986,7 @@ thermos_gui <- function() {
             shiny::tags$div(
               class = "thermos-section-body",
               shiny::tags$p(class = "help-block", "Use these only when you want to run one stage separately instead of the full analysis."),
-              shiny::tags$div(
-                class = "thermos-actions-grid",
-                shiny::actionButton("check", "Check inputs", icon = shiny::icon("shield-alt")),
-                shiny::actionButton("run_raster", "Run rasterization", icon = shiny::icon("table")),
-                shiny::actionButton("run_svf", "Run SVF", icon = shiny::icon("sun")),
-                shiny::actionButton("run_thermal", "Run thermal", icon = shiny::icon("thermometer-half"))
-              )
+              shiny::uiOutput("step_tools_ui")
             )
           )
         ),
@@ -974,7 +1001,7 @@ thermos_gui <- function() {
             shiny::tags$div(
               class = "thermos-header-run",
               shiny::uiOutput("task_panel_ui"),
-              shiny::actionButton("run_all", "Run analysis", icon = shiny::icon("play"), class = "btn-primary thermos-primary-btn")
+              shiny::uiOutput("run_analysis_ui")
             )
           ),
           shiny::tags$div(
@@ -1025,6 +1052,8 @@ thermos_gui <- function() {
       cached_input_ids <- c(
         "lc_path",
         "obs_path",
+        "existing_lc_dir",
+        "existing_svf_dir",
         "dem_dir",
         "dsm_dir",
         "met_xlsx",
@@ -1083,6 +1112,40 @@ thermos_gui <- function() {
       last_browse_dir <- shiny::reactiveVal(read_last_browse_dir())
       cached_input_paths <- shiny::reactiveVal(read_cached_input_paths())
       last_run_scripts <- shiny::reactiveVal(NULL)
+
+      output$run_analysis_ui <- shiny::renderUI({
+        label <- if (identical(input$workflow_mode, "thermal_only")) {
+          "Run thermal analysis"
+        } else {
+          "Run full pipeline"
+        }
+        shiny::actionButton(
+          "run_all",
+          label,
+          icon = shiny::icon("play"),
+          class = "btn-primary thermos-primary-btn"
+        )
+      })
+
+      output$step_tools_ui <- shiny::renderUI({
+        buttons <- list(
+          shiny::actionButton("check", "Check inputs", icon = shiny::icon("shield-alt"))
+        )
+        if (identical(input$workflow_mode, "full")) {
+          buttons <- c(
+            buttons,
+            list(
+              shiny::actionButton("run_raster", "Run rasterization", icon = shiny::icon("table")),
+              shiny::actionButton("run_svf", "Run SVF", icon = shiny::icon("sun"))
+            )
+          )
+        }
+        buttons <- c(
+          buttons,
+          list(shiny::actionButton("run_thermal", "Run thermal", icon = shiny::icon("thermometer-half")))
+        )
+        shiny::tags$div(class = "thermos-actions-grid", buttons)
+      })
 
       session$onFlushed(function() {
         saved <- shiny::isolate(cached_input_paths())
@@ -1268,6 +1331,11 @@ thermos_gui <- function() {
               "thermos_make_const_rast",
               "thermos_first_match",
               "thermos_dir_must_exist",
+              "thermos_required_landcover_layers",
+              "thermos_find_suffix_file",
+              "thermos_compare_raster_geometry",
+              "thermos_check_raster_compatibility",
+              "thermos_validate_existing_thermal_inputs",
               "thermos_compute_shadow",
               "thermos_compute_I0",
               "thermos_save_rast",
@@ -1429,16 +1497,31 @@ thermos_gui <- function() {
         )
       }
 
+      active_intermediate_dirs <- function() {
+        output_dirs <- build_output_dirs(input$output_root)
+        if (identical(input$workflow_mode, "thermal_only")) {
+          return(list(
+            lc_dir = input$existing_lc_dir,
+            svf_dir = input$existing_svf_dir
+          ))
+        }
+        list(
+          lc_dir = output_dirs$lc_dir,
+          svf_dir = output_dirs$svf_dir
+        )
+      }
+
       list_raster_choices <- function(output_root, category) {
         if (!isTRUE(session_has_outputs())) {
           return(setNames(character(0), character(0)))
         }
 
         dirs <- build_output_dirs(output_root)
+        intermediates <- active_intermediate_dirs()
         folder <- switch(
           category,
-          rasters_for_modeling = dirs$lc_dir,
-          svf = dirs$svf_dir,
+          rasters_for_modeling = intermediates$lc_dir,
+          svf = intermediates$svf_dir,
           results = dirs$out_dir,
           dirs$out_dir
         )
@@ -1552,12 +1635,12 @@ thermos_gui <- function() {
       }
 
       refresh_plot_suffix_choices <- function(preferred = NULL) {
-        output_dirs <- build_output_dirs(input$output_root)
+        intermediate_dirs <- active_intermediate_dirs()
         detected <- thermos_detect_available_suffixes(
           dem_dir = input$dem_dir,
           dsm_dir = input$dsm_dir,
-          svf_dir = output_dirs$svf_dir,
-          lc_dir = output_dirs$lc_dir
+          svf_dir = intermediate_dirs$svf_dir,
+          lc_dir = intermediate_dirs$lc_dir
         )
 
         choices <- c(
@@ -1655,6 +1738,36 @@ thermos_gui <- function() {
         })
       })
 
+      shiny::observeEvent(input$existing_lc_dir_browse, {
+        safe_browse({
+          selected <- choose_directory_path(
+            "Select rasterized land-cover folder",
+            browse_default(input$existing_lc_dir)
+          )
+          if (!is.null(selected)) {
+            remember_browse_path(selected)
+            remember_input_path("existing_lc_dir", selected)
+            shiny::updateTextInput(session, "existing_lc_dir", value = selected)
+            status("Selected existing rasterized land-cover folder.")
+          }
+        })
+      })
+
+      shiny::observeEvent(input$existing_svf_dir_browse, {
+        safe_browse({
+          selected <- choose_directory_path(
+            "Select existing SVF folder",
+            browse_default(input$existing_svf_dir)
+          )
+          if (!is.null(selected)) {
+            remember_browse_path(selected)
+            remember_input_path("existing_svf_dir", selected)
+            shiny::updateTextInput(session, "existing_svf_dir", value = selected)
+            status("Selected existing SVF folder.")
+          }
+        })
+      })
+
       shiny::observeEvent(input$output_root_browse, {
         safe_browse({
           selected <- choose_directory_path("Select parent output folder", browse_default(input$output_root))
@@ -1690,15 +1803,30 @@ thermos_gui <- function() {
         refresh_plot_suffix_choices(input$plot_suffix)
       }, ignoreInit = FALSE)
 
+      shiny::observeEvent(input$existing_lc_dir, {
+        refresh_plot_suffix_choices(input$plot_suffix)
+      }, ignoreInit = FALSE)
+
+      shiny::observeEvent(input$existing_svf_dir, {
+        refresh_plot_suffix_choices(input$plot_suffix)
+      }, ignoreInit = FALSE)
+
+      shiny::observeEvent(input$workflow_mode, {
+        reset_visualization_state()
+        refresh_plot_suffix_choices(input$plot_suffix)
+      }, ignoreInit = TRUE)
+
       get_args <- function() {
         output_dirs <- build_output_dirs(input$output_root)
+        intermediate_dirs <- active_intermediate_dirs()
         list(
+          workflow_mode = input$workflow_mode,
           lc_path = input$lc_path,
           obs_path = input$obs_path,
           dem_dir = input$dem_dir,
           dsm_dir = input$dsm_dir,
-          lc_dir = output_dirs$lc_dir,
-          svf_dir = output_dirs$svf_dir,
+          lc_dir = intermediate_dirs$lc_dir,
+          svf_dir = intermediate_dirs$svf_dir,
           out_dir = output_dirs$out_dir,
           parent_output_root = output_dirs$parent,
           output_root = output_dirs$root,
@@ -1714,15 +1842,46 @@ thermos_gui <- function() {
         )
       }
 
+      validate_workflow_args <- function(args, thermal_inputs_required = FALSE) {
+        tryCatch(
+          {
+            if (identical(args$workflow_mode, "thermal_only") || isTRUE(thermal_inputs_required)) {
+              return(thermos_validate_existing_thermal_inputs(
+                dem_dir = args$dem_dir,
+                dsm_dir = args$dsm_dir,
+                svf_dir = args$svf_dir,
+                lc_dir = args$lc_dir,
+                met_xlsx = args$met_xlsx,
+                plot_suffix = args$plot_suffix
+              ))
+            }
+
+            checks <- thermos_check_inputs(
+              lc_path = args$lc_path,
+              obs_path = args$obs_path,
+              dem_dir = args$dem_dir,
+              dsm_dir = args$dsm_dir,
+              met_xlsx = args$met_xlsx
+            )
+            if (!isTRUE(checks$ok)) {
+              stop(paste(checks$messages, collapse = "\n"), call. = FALSE)
+            }
+            checks
+          },
+          error = function(e) {
+            status(paste("Input error:", conditionMessage(e)))
+            NULL
+          }
+        )
+      }
+
       shiny::observeEvent(input$check, {
         args <- get_args()
-        res <- thermos_check_inputs(
-          lc_path = args$lc_path,
-          obs_path = args$obs_path,
-          dem_dir = args$dem_dir,
-          dsm_dir = args$dsm_dir,
-          met_xlsx = args$met_xlsx
-        )
+        res <- validate_workflow_args(args)
+        if (is.null(res)) {
+          results(data.frame(ok = FALSE))
+          return()
+        }
         detected_plots <- thermos_detect_available_suffixes(
           dem_dir = args$dem_dir,
           dsm_dir = args$dsm_dir,
@@ -1745,7 +1904,7 @@ thermos_gui <- function() {
             sep = "\n"
           )
         )
-        results(as.data.frame(list(ok = res$ok)))
+        results(as.data.frame(list(ok = isTRUE(res$ok))))
       })
 
       shiny::observeEvent(input$run_raster, {
@@ -1788,6 +1947,9 @@ thermos_gui <- function() {
 
       shiny::observeEvent(input$run_thermal, {
         args <- get_args()
+        if (is.null(validate_workflow_args(args, thermal_inputs_required = TRUE))) {
+          return()
+        }
         last_run_scripts(make_run_scripts(args, include = "thermal"))
         start_background_task(
           task_type = "thermal",
@@ -1813,6 +1975,35 @@ thermos_gui <- function() {
 
       shiny::observeEvent(input$run_all, {
         args <- get_args()
+        if (is.null(validate_workflow_args(args))) {
+          return()
+        }
+
+        if (identical(args$workflow_mode, "thermal_only")) {
+          last_run_scripts(make_run_scripts(args, include = "thermal"))
+          start_background_task(
+            task_type = "thermal",
+            label = "Thermal analysis",
+            success_title = "Thermal analysis complete",
+            success_message = "Thermal rasters and summary outputs are ready.",
+            fun_name = "thermos_thermal_comfort",
+            fun_args = list(
+              dem_dir = args$dem_dir,
+              dsm_dir = args$dsm_dir,
+              svf_dir = args$svf_dir,
+              lc_dir = args$lc_dir,
+              out_dir = args$out_dir,
+              plot_suffix = args$plot_suffix,
+              met_xlsx = args$met_xlsx,
+              Met = args$Met,
+              Clo = args$Clo,
+              ht = args$ht,
+              mbody = args$mbody
+            )
+          )
+          return()
+        }
+
         last_run_scripts(make_run_scripts(args, include = c("raster", "svf", "thermal")))
         start_background_task(
           task_type = "pipeline",

@@ -43,6 +43,17 @@ Thermos/
 3. Compute thermal-comfort outputs such as `Tmrt`, `PET`, `mPET`, `PMV`,
    `SET`, `UTCI`, and `UTCI class`.
 
+The GUI provides two analysis modes:
+
+- **Full pipeline** runs rasterization, SVF, and thermal analysis.
+- **Thermal from existing rasters** reuses existing land-cover and SVF folders
+  and runs only the thermal stage.
+
+Existing rasters must use matching plot suffixes. For example, `plot01`
+requires `svf_plot01.tif` and land-cover files such as
+`albedo_plot01.tif`, `emis_plot01.tif`, and the remaining generated layers.
+For multiple plots, the GUI can run one detected suffix or all complete plots.
+
 ## Data policy
 
 Sample and test datasets are intentionally not included in this repository.
