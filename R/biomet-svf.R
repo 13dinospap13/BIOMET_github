@@ -10,42 +10,59 @@ biomet_compute_svf_matrix <- function(dsm_r,
   nc <- ncol(dsm_mat)
   svf_mat <- matrix(NA_real_, nrow = nr, ncol = nc)
   max_steps <- ceiling(max_distance / r)
+  steps <- seq_len(max_steps)
   angles <- seq(0, 2 * pi, length.out = num_directions + 1)[-(num_directions + 1)]
   angle_step <- 2 * pi / num_directions
+  valid_cells <- which(!is.na(dem_mat), arr.ind = TRUE)
+  valid_cells <- valid_cells[order(valid_cells[, 1], valid_cells[, 2]), , drop = FALSE]
 
-  for (row in seq_len(nr)) {
-    for (col in seq_len(nc)) {
-      dem_h <- dem_mat[row, col]
-      if (is.na(dem_h)) {
-        next
+  for (i in seq_len(nrow(valid_cells))) {
+    row <- valid_cells[i, 1]
+    col <- valid_cells[i, 2]
+    h0 <- dem_mat[row, col] + observer_height
+    max_angle <- 0
+    angles_px <- angles + stats::runif(1, 0, angle_step)
+
+    for (az in angles_px) {
+      dx <- sin(az)
+      dy <- -cos(az)
+      rr <- round(row + dy * steps)
+      cc <- round(col + dx * steps)
+      in_bounds <- rr >= 1 & rr <= nr & cc >= 1 & cc <= nc
+
+      if (!all(in_bounds)) {
+        first_out <- which(!in_bounds)[1]
+        if (first_out == 1) {
+          next
+        }
+        keep <- seq_len(first_out - 1)
+        rr <- rr[keep]
+        cc <- cc[keep]
+        s <- steps[keep]
+      } else {
+        s <- steps
       }
-      h0 <- dem_h + observer_height
-      max_angle <- 0
-      jitter <- stats::runif(1, 0, angle_step)
-      angles_px <- angles + jitter
 
-      for (az in angles_px) {
-        dx <- sin(az)
-        dy <- -cos(az)
+      h_obs <- dsm_mat[cbind(rr, cc)]
+      if (anyNA(h_obs)) {
+        first_na <- which(is.na(h_obs))[1]
+        if (first_na == 1) {
+          next
+        }
+        keep <- seq_len(first_na - 1)
+        h_obs <- h_obs[keep]
+        s <- s[keep]
+      }
 
-        for (s in seq_len(max_steps)) {
-          cr <- round(row + dy * s)
-          cc <- round(col + dx * s)
-          if (cr < 1 || cr > nr || cc < 1 || cc > nc) {
-            break
-          }
-          h_obs <- dsm_mat[cr, cc]
-          if (is.na(h_obs)) {
-            break
-          }
-          elev_angle <- atan2(h_obs - h0, r * s)
-          if (elev_angle > max_angle) {
-            max_angle <- elev_angle
-          }
+      if (length(h_obs) > 0) {
+        ray_max <- max(atan2(h_obs - h0, r * s))
+        if (ray_max > max_angle) {
+          max_angle <- ray_max
         }
       }
-      svf_mat[row, col] <- 1 - sin(max_angle)
     }
+
+    svf_mat[row, col] <- 1 - sin(max_angle)
   }
 
   out <- terra::setValues(terra::rast(dsm_r), as.vector(t(svf_mat)))
@@ -148,4 +165,3 @@ biomet_calculate_svf <- function(dem_dir,
   utils::write.csv(results, file.path(svf_dir, "svf_batch_summary.csv"), row.names = FALSE)
   results
 }
-

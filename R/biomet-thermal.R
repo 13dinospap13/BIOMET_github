@@ -5,33 +5,48 @@ biomet_compute_shadow <- function(dsm_r, dem_r, zenith_deg, azimuth_deg) {
   dx <- sin(az_rad)
   dy <- -cos(az_rad)
   mat <- as.matrix(dsm_r, wide = TRUE)
+  dem_mat <- as.matrix(dem_r, wide = TRUE)
   nr <- nrow(mat)
   nc <- ncol(mat)
   shd <- matrix(1L, nrow = nr, ncol = nc)
   max_steps <- ceiling(150 / r)
+  steps <- seq_len(max_steps)
+  valid_cells <- which(!is.na(mat) & !is.na(dem_mat), arr.ind = TRUE)
 
-  for (row in seq_len(nr)) {
-    for (col in seq_len(nc)) {
-      h0 <- mat[row, col]
-      if (is.na(h0)) {
+  for (i in seq_len(nrow(valid_cells))) {
+    row <- valid_cells[i, 1]
+    col <- valid_cells[i, 2]
+    h0 <- mat[row, col]
+
+    rr <- round(row + dy * steps)
+    cc <- round(col + dx * steps)
+    in_bounds <- rr >= 1 & rr <= nr & cc >= 1 & cc <= nc
+    if (!all(in_bounds)) {
+      first_out <- which(!in_bounds)[1]
+      if (first_out == 1) {
         next
       }
-      for (s in seq_len(max_steps)) {
-        cr <- round(row + dy * s)
-        cc <- round(col + dx * s)
-        if (cr < 1 || cr > nr || cc < 1 || cc > nc) {
-          break
-        }
-        h_obs <- mat[cr, cc]
-        if (is.na(h_obs)) {
-          break
-        }
-        h_req <- h0 + tan_elev * r * s
-        if (h_obs > h_req) {
-          shd[row, col] <- 0L
-          break
-        }
+      keep <- seq_len(first_out - 1)
+      rr <- rr[keep]
+      cc <- cc[keep]
+      s <- steps[keep]
+    } else {
+      s <- steps
+    }
+
+    h_obs <- mat[cbind(rr, cc)]
+    if (anyNA(h_obs)) {
+      first_na <- which(is.na(h_obs))[1]
+      if (first_na == 1) {
+        next
       }
+      keep <- seq_len(first_na - 1)
+      h_obs <- h_obs[keep]
+      s <- s[keep]
+    }
+
+    if (any(h_obs > h0 + tan_elev * r * s)) {
+      shd[row, col] <- 0L
     }
   }
 
