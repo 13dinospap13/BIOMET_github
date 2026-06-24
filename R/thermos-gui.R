@@ -1019,7 +1019,17 @@ thermos_gui <- function() {
       )
     ),
     server = function(input, output, session) {
-      browse_state_file <- file.path(tools::R_user_dir("Thermos", "cache"), "last_browse_dir.txt")
+      cache_dir <- tools::R_user_dir("Thermos", "cache")
+      browse_state_file <- file.path(cache_dir, "last_browse_dir.txt")
+      input_paths_file <- file.path(cache_dir, "input_paths.rds")
+      cached_input_ids <- c(
+        "lc_path",
+        "obs_path",
+        "dem_dir",
+        "dsm_dir",
+        "met_xlsx",
+        "output_root"
+      )
 
       read_last_browse_dir <- function() {
         if (file.exists(browse_state_file)) {
@@ -1032,9 +1042,38 @@ thermos_gui <- function() {
       }
 
       write_last_browse_dir <- function(path) {
-        cache_dir <- dirname(browse_state_file)
         dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
         writeLines(path, browse_state_file, useBytes = TRUE)
+      }
+
+      read_cached_input_paths <- function() {
+        if (!file.exists(input_paths_file)) {
+          return(stats::setNames(as.list(rep("", length(cached_input_ids))), cached_input_ids))
+        }
+
+        saved <- tryCatch(readRDS(input_paths_file), error = function(e) NULL)
+        if (!is.list(saved)) {
+          saved <- list()
+        }
+
+        paths <- stats::setNames(as.list(rep("", length(cached_input_ids))), cached_input_ids)
+        for (input_id in cached_input_ids) {
+          path <- saved[[input_id]]
+          if (!is.null(path) && length(path) == 1 && nzchar(path) &&
+              (file.exists(path) || dir.exists(path))) {
+            paths[[input_id]] <- normalizePath(path, winslash = "/", mustWork = TRUE)
+          }
+        }
+        paths
+      }
+
+      write_cached_input_paths <- function(paths) {
+        dir.create(cache_dir, showWarnings = FALSE, recursive = TRUE)
+        tryCatch(
+          saveRDS(paths[cached_input_ids], input_paths_file),
+          error = function(e) NULL
+        )
+        invisible(NULL)
       }
 
       status <- shiny::reactiveVal("Ready.")
@@ -1042,7 +1081,17 @@ thermos_gui <- function() {
       session_has_outputs <- shiny::reactiveVal(FALSE)
       current_task <- shiny::reactiveVal(NULL)
       last_browse_dir <- shiny::reactiveVal(read_last_browse_dir())
+      cached_input_paths <- shiny::reactiveVal(read_cached_input_paths())
       last_run_scripts <- shiny::reactiveVal(NULL)
+
+      session$onFlushed(function() {
+        saved <- cached_input_paths()
+        for (input_id in cached_input_ids) {
+          if (nzchar(saved[[input_id]])) {
+            shiny::updateTextInput(session, input_id, value = saved[[input_id]])
+          }
+        }
+      }, once = TRUE)
 
       browse_default <- function(current_path = NULL) {
         if (!is.null(current_path) && nzchar(current_path)) {
@@ -1067,6 +1116,18 @@ thermos_gui <- function() {
             write_last_browse_dir(remembered)
           }
         }
+        invisible(NULL)
+      }
+
+      remember_input_path <- function(input_id, path) {
+        if (!(input_id %in% cached_input_ids) || is.null(path) || !nzchar(path)) {
+          return(invisible(NULL))
+        }
+
+        saved <- cached_input_paths()
+        saved[[input_id]] <- normalizePath(path, winslash = "/", mustWork = FALSE)
+        cached_input_paths(saved)
+        write_cached_input_paths(saved)
         invisible(NULL)
       }
 
@@ -1531,6 +1592,7 @@ thermos_gui <- function() {
           )
           if (!is.null(selected)) {
             remember_browse_path(selected)
+            remember_input_path("lc_path", selected)
             shiny::updateTextInput(session, "lc_path", value = selected)
             status("Selected land-cover GeoPackage.")
           }
@@ -1546,6 +1608,7 @@ thermos_gui <- function() {
           )
           if (!is.null(selected)) {
             remember_browse_path(selected)
+            remember_input_path("obs_path", selected)
             shiny::updateTextInput(session, "obs_path", value = selected)
             status("Selected obstacles GeoPackage.")
           }
@@ -1561,6 +1624,7 @@ thermos_gui <- function() {
           )
           if (!is.null(selected)) {
             remember_browse_path(selected)
+            remember_input_path("met_xlsx", selected)
             shiny::updateTextInput(session, "met_xlsx", value = selected)
             status("Selected meteorological Excel file.")
           }
@@ -1572,6 +1636,7 @@ thermos_gui <- function() {
           selected <- choose_directory_path("Select DEM folder", browse_default(input$dem_dir))
           if (!is.null(selected)) {
             remember_browse_path(selected)
+            remember_input_path("dem_dir", selected)
             shiny::updateTextInput(session, "dem_dir", value = selected)
             status("Selected DEM folder.")
           }
@@ -1583,6 +1648,7 @@ thermos_gui <- function() {
           selected <- choose_directory_path("Select DSM folder", browse_default(input$dsm_dir))
           if (!is.null(selected)) {
             remember_browse_path(selected)
+            remember_input_path("dsm_dir", selected)
             shiny::updateTextInput(session, "dsm_dir", value = selected)
             status("Selected DSM folder.")
           }
@@ -1594,6 +1660,7 @@ thermos_gui <- function() {
           selected <- choose_directory_path("Select parent output folder", browse_default(input$output_root))
           if (!is.null(selected)) {
             remember_browse_path(selected)
+            remember_input_path("output_root", selected)
             shiny::updateTextInput(session, "output_root", value = selected)
             results(NULL)
             last_run_scripts(NULL)
