@@ -129,27 +129,235 @@ thermos_calc_pmv <- function(ta, tr, v, vp, Met, Clo, ht, mbody) {
   (0.303 * exp(-0.036 * M_w2) + 0.028) * L
 }
 
+thermos_calc_set_one <- function(ta, tr, vel, rh, clo, met, sa, ht, wt) {
+  wme <- 0
+  pb <- 760
+  ltime <- 60
+  csw <- 170
+  cdil <- 120
+  cstr <- 0.5
+
+  m <- met * 58.2
+  w <- wme * 58.2
+  kclo <- 0.25
+  tskn <- 33.7
+  tcrn <- 36.8
+  tbn <- 36.49
+  skbfn <- 6.3
+  sbc <- 5.6697e-08
+
+  vel <- max(vel, 0.1)
+  tsk <- tskn
+  tcr <- tcrn
+  skbf <- skbfn
+  mshiv <- 0
+  alfa <- 0.1
+  rmm <- m
+  esk <- 0.1 * met
+
+  atm <- pb / 760
+  rcl <- 0.155 * clo
+  facl <- 1 + 0.15 * clo
+  lr <- 2.2 / atm
+  pa <- rh * exp(18.6686 - (4030.183 / (ta + 235))) / 100
+
+  if (clo <= 0) {
+    wcrit <- 0.38 * vel^(-0.29)
+    icl <- 1
+  } else {
+    wcrit <- 0.59 * vel^(-0.08)
+    icl <- 0.45
+  }
+
+  chc <- 3 * atm^0.53
+  if (rmm / 58.2 < 0.85) {
+    chca <- 0
+  } else {
+    chca <- 5.66 * ((rmm / 58.2 - 0.85) * atm)^0.39
+  }
+  chcv <- 8.600001 * (vel * atm)^0.53
+  if (chc <= chca) {
+    chc <- chca
+  }
+  chc <- max(chc, chcv)
+
+  chr <- 4.7
+  ctc <- chr + chc
+  ra <- 1 / (facl * ctc)
+  top <- (chr * tr + chc * ta) / ctc
+  tcl <- top + (tsk - top) / (ctc * (ra + rcl))
+  tclold <- tcl
+  flag <- FALSE
+
+  fnsvp <- function(T) exp(18.6686 - 4030.183 / (T + 235))
+
+  for (tim in seq_len(ltime)) {
+    if (flag) {
+      tcl <- (ra * tsk + rcl * top) / (ra + rcl)
+      if (abs(tcl - tclold) > 0.01) {
+        flag <- FALSE
+        tclold <- tcl
+      } else {
+        flag <- TRUE
+      }
+    }
+
+    while (!flag) {
+      chr <- 4.0 * 0.95 * sbc * (((tcl + tr) / 2.0 + 273.15)^3.0) * 0.73
+      ctc <- chr + chc
+      ra <- 1 / (facl * ctc)
+      top <- (chr * tr + chc * ta) / ctc
+      tcl <- (ra * tsk + rcl * top) / (ra + rcl)
+      if (abs(tcl - tclold) > 0.01) {
+        flag <- FALSE
+        tclold <- tcl
+      } else {
+        flag <- TRUE
+      }
+    }
+
+    dry <- (tsk - top) / (ra + rcl)
+    hfcs <- (tcr - tsk) * (5.28 + 1.163 * skbf)
+    eres <- 0.0023 * m * (44 - pa)
+    cres <- 0.0014 * m * (34 - ta)
+    scr <- m - hfcs - eres - cres - w
+    ssk <- hfcs - dry - esk
+    tcsk <- 0.97 * alfa * wt
+    tccr <- 0.97 * (1 - alfa) * wt
+    dtsk <- (ssk * sa) / tcsk / 60
+    dtcr <- scr * sa / tccr / 60
+    tsk <- tsk + dtsk
+    tcr <- tcr + dtcr
+    tb <- alfa * tsk + (1 - alfa) * tcr
+
+    if (tsk > tskn) {
+      warms <- tsk - tskn
+      colds <- 0
+    } else {
+      colds <- tskn - tsk
+      warms <- 0
+    }
+
+    if (tcr > tcrn) {
+      warmc <- tcr - tcrn
+      coldc <- 0
+    } else {
+      coldc <- tcrn - tcr
+      warmc <- 0
+    }
+
+    if (tb > tbn) {
+      warmb <- tb - tbn
+    } else {
+      warmb <- 0
+    }
+
+    skbf <- (skbfn + cdil * warmc) / (1 + cstr * colds)
+    if (skbf > 90) {
+      skbf <- 90
+    }
+    if (skbf < 0.5) {
+      skbf <- 0.5
+    }
+
+    regsw <- csw * warmb * exp(warms / 10.7)
+    if (regsw > 500) {
+      regsw <- 500
+    }
+    ersw <- 0.68 * regsw
+    rea <- 1 / (lr * facl * chc)
+    recl <- rcl / (lr * icl)
+    emax <- (fnsvp(tsk) - pa) / (rea + recl)
+    prsw <- ersw / emax
+    pwet <- 0.06 + 0.94 * prsw
+    edif <- pwet * emax - ersw
+    esk <- ersw + edif
+
+    if (pwet > wcrit) {
+      pwet <- wcrit
+      prsw <- wcrit / 0.94
+      ersw <- prsw * emax
+      edif <- 0.06 * (1 - prsw) * emax
+      esk <- ersw + edif
+    }
+
+    if (emax < 0) {
+      edif <- 0
+      ersw <- 0
+      pwet <- wcrit
+      prsw <- wcrit
+      esk <- emax
+    }
+
+    mshiv <- 19.4 * colds * coldc
+    m <- rmm + mshiv
+    alfa <- 0.0417737 + 0.7451833 / (skbf + 0.585417)
+  }
+
+  hsk <- dry + esk
+  pssk <- fnsvp(tsk)
+  chrs <- chr
+  if (met < 0.85) {
+    chcs <- 3
+  } else {
+    chcs <- 5.66 * (met - 0.85)^0.39
+    if (chcs < 3) {
+      chcs <- 3
+    }
+  }
+  ctcs <- chcs + chrs
+  rclos <- 1.52 / ((met - wme) + 0.6944) - 0.1835
+  rcls <- 0.155 * rclos
+  facls <- 1 + kclo * rclos
+  fcls <- 1 / (1 + 0.155 * facls * ctcs * rclos)
+  ims <- 0.45
+  icls <- (ims * chcs / ctcs * (1 - fcls)) / (chcs / ctcs - fcls * ims)
+  ras <- 1 / (facls * ctcs)
+  reas <- 1 / (lr * facls * chcs)
+  recls <- rcls / (lr * icls)
+  hd_s <- 1 / (ras + rcls)
+  he_s <- 1 / (reas + recls)
+
+  fnerrs <- function(x) {
+    hsk - hd_s * (tsk - x) - pwet * he_s * (pssk - 0.5 * fnsvp(x))
+  }
+
+  delta <- 0.0001
+  xold <- tsk - hsk / hd_s
+  flag2 <- FALSE
+  while (!flag2) {
+    err1 <- fnerrs(xold)
+    err2 <- fnerrs(xold + delta)
+    x <- xold - delta * err1 / (err2 - err1)
+    if (abs(x - xold) > 0.01) {
+      xold <- x
+      flag2 <- FALSE
+    } else {
+      flag2 <- TRUE
+    }
+  }
+  x
+}
+
 thermos_calc_set <- function(ta, tr, v, rh, M, icl, ht, mbody) {
-  Adu <- 0.203 * mbody^0.425 * ht^0.725
-  met_units <- (M / Adu) / 58.15
-  clo_units <- icl / 0.155
   ht_cm <- ht * 100
+  sa <- ((ht_cm * mbody) / 3600)^0.5
+  met_units <- M / (58.2 * sa)
+  clo_units <- icl / 0.155
 
   vapply(
     seq_along(ta),
     function(i) {
-      comf::calcSET(
+      thermos_calc_set_one(
         ta = ta[i],
         tr = tr[i],
         vel = v[i],
         rh = rh[i],
         clo = clo_units,
         met = met_units,
-        wme = 0,
+        sa = sa,
         ht = ht_cm,
-        wt = mbody,
-        obj = "set",
-        bodyPosition = "standing"
+        wt = mbody
       )
     },
     numeric(1)
