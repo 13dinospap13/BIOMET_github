@@ -19,6 +19,7 @@ The package declares these `R` dependencies:
 - `readxl`
 - `lubridate`
 - `solartime`
+- `comf`
 - `shiny`
 
 In most Windows and macOS setups, `remotes::install_local(..., dependencies = TRUE)`
@@ -39,7 +40,7 @@ as well.
 Try installing the dependencies manually first:
 
 ```r
-install.packages(c("terra", "readxl", "lubridate", "solartime", "shiny", "remotes"))
+install.packages(c("terra", "readxl", "lubridate", "solartime", "shiny", "comf", "remotes"))
 ```
 
 Then run:

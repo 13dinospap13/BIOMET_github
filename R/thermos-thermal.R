@@ -131,23 +131,29 @@ thermos_calc_pmv <- function(ta, tr, v, vp, Met, Clo, ht, mbody) {
 
 thermos_calc_set <- function(ta, tr, v, rh, M, icl, ht, mbody) {
   Adu <- 0.203 * mbody^0.425 * ht^0.725
-  M_w2 <- M / Adu
-  pa_kPa <- rh / 100 * 0.6112 * exp(17.67 * ta / (ta + 243.5))
-  hc <- pmax(3 * v^0.6, 8.3 * sqrt(v))
-  hr <- 4.7
-  h <- hc + hr
-  fcl <- 1 + 0.31 * icl / 0.155
-  Fcl <- 1 / (1 + 0.155 * icl * fcl * h)
-  T_op <- (hc * ta + hr * tr) / h
-  Tsk <- 35.7 - 0.028 * M_w2
-  P_sk_s <- 0.6112 * exp(17.27 * Tsk / (Tsk + 237.3))
-  Emax <- hc * fcl * 16.5 * (P_sk_s - pa_kPa)
-  ersw <- pmax(0.42 * (M_w2 - 58.15), 0)
-  E_sk <- pmin(0.06 * Emax + ersw, Emax)
-  Eres <- 0.0023 * M_w2 * (44 - pa_kPa * 7.5)
-  Cres <- 0.0014 * M_w2 * (34 - ta)
-  S <- M_w2 - E_sk - Eres - Cres - h * Fcl * (Tsk - T_op)
-  T_op - S / (h * Fcl)
+  met_units <- (M / Adu) / 58.15
+  clo_units <- icl / 0.155
+  ht_cm <- ht * 100
+
+  vapply(
+    seq_along(ta),
+    function(i) {
+      comf::calcSET(
+        ta = ta[i],
+        tr = tr[i],
+        vel = v[i],
+        rh = rh[i],
+        clo = clo_units,
+        met = met_units,
+        wme = 0,
+        ht = ht_cm,
+        wt = mbody,
+        obj = "set",
+        bodyPosition = "standing"
+      )
+    },
+    numeric(1)
+  )
 }
 
 thermos_lc_load <- function(name, plot_suffix, lc_dir, dem, dem_vals) {

@@ -969,7 +969,7 @@ thermos_gui <- function() {
               shiny::tags$h4("Thermal parameters"),
               shiny::tags$div(
                 class = "thermos-param-grid",
-                shiny::numericInput("Met", "Metabolic rate (W/m2)", value = 80, min = 1),
+                shiny::numericInput("Met", "Metabolic rate (W)", value = 80, min = 1),
                 shiny::numericInput("Clo", "Clothing insulation (clo)", value = 0.9, min = 0),
                 shiny::numericInput("ht", "Body height (m)", value = 1.75, min = 0.5),
                 shiny::numericInput("mbody", "Body mass (kg)", value = 75, min = 1)
