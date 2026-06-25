@@ -105,11 +105,11 @@ thermos_calc_set <- function(ta, tr, v, rh, M, icl, ht, mbody) {
   fcl <- 1 + 0.31 * icl / 0.155
   Fcl <- 1 / (1 + 0.155 * icl * fcl * h)
   T_op <- (hc * ta + hr * tr) / h
-  Tsk <- 34 - 0.065 * (M_w2 - 83)
-  w <- pmin(pmax(0.06, 0.06 + 0.42 * (M_w2 - 58.15) / 10.7), 1.0)
+  Tsk <- 35.7 - 0.028 * M_w2
   P_sk_s <- 0.6112 * exp(17.27 * Tsk / (Tsk + 237.3))
   Emax <- hc * fcl * 16.5 * (P_sk_s - pa_kPa)
-  E_sk <- w * Emax
+  ersw <- pmax(0.42 * (M_w2 - 58.15), 0)
+  E_sk <- pmin(0.06 * Emax + ersw, Emax)
   Eres <- 0.0023 * M_w2 * (44 - pa_kPa * 7.5)
   Cres <- 0.0014 * M_w2 * (34 - ta)
   S <- M_w2 - E_sk - Eres - Cres - h * Fcl * (Tsk - T_op)
@@ -335,10 +335,15 @@ thermos_thermal_comfort_one_plot <- function(dem_dir,
 
     pa <- vp * 100
     tcl <- ta + (35.5 - ta) / (3.5 * (6.45 * icl + 0.1))
+    for (iter in seq_len(3)) {
+      hcf <- pmax(2.38 * abs(tcl - ta)^0.25, 12.1 * sqrt(v))
+      f_val <- tcl - 35.7 + 0.0275 * M +
+        icl * (3.96e-8 * fcl * ((tcl + 273)^4 - (tr + 273)^4) +
+          fcl * hcf * (tcl - ta))
+      f_drv <- 1 + icl * (3.96e-8 * fcl * 4 * (tcl + 273)^3 + fcl * hcf)
+      tcl <- tcl - f_val / f_drv
+    }
     hcf <- pmax(2.38 * abs(tcl - ta)^0.25, 12.1 * sqrt(v))
-    tcl <- (35.7 - 0.0275 * M - icl * (3.96e-8 * fcl * ((tcl + 273)^4 - (tr + 273)^4) +
-      fcl * hcf * (tcl - ta))) /
-      (1 + icl * (3.96e-8 * fcl * 4 * (tcl + 273)^3 + fcl * hcf))
     L <- M - 3.05e-3 * (5733 - 6.99 * M - pa) -
       0.42 * (M - 58.15) - 1.7e-5 * M * (5867 - pa) -
       0.0014 * M * (34 - ta) -
