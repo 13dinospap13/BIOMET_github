@@ -1,4 +1,4 @@
-thermos_compute_shadow <- function(dsm_r, dem_r, zenith_deg, azimuth_deg) {
+thermos_compute_shadow <- function(dsm_r, dem_r, zenith_deg, azimuth_deg, observer_height = 1.1) {
   r <- terra::res(dsm_r)[1]
   tan_elev <- tan((90 - zenith_deg) * pi / 180)
   az_rad <- azimuth_deg * pi / 180
@@ -16,7 +16,7 @@ thermos_compute_shadow <- function(dsm_r, dem_r, zenith_deg, azimuth_deg) {
   for (i in seq_len(nrow(valid_cells))) {
     row <- valid_cells[i, 1]
     col <- valid_cells[i, 2]
-    h0 <- mat[row, col]
+    h0 <- dem_mat[row, col] + observer_height
 
     rr <- round(row + dy * steps)
     cc <- round(col + dx * steps)
@@ -88,11 +88,45 @@ thermos_calc_pet <- function(ta, tr, v, vp, M, icl, ht, mbody) {
   hr <- 4 * 0.97 * 5.67e-8 * ((tr + ta) / 2 + 273)^3
   Tsk <- 34 - 0.065 * (M_w2 - 83)
   Tcl <- (Tsk + (hc * ta + hr * tr) * icl * fcl) / (1 + icl * fcl * (hc + hr))
-  E_sw <- 0.42 * (M_w2 - 58.15)
+  E_sw <- pmax(0.42 * (M_w2 - 58.15), 0)
   E_re <- 1.7e-5 * M_w2 * (5867 - vp * 100) + 0.0014 * M_w2 * (34 - ta)
   R_cl <- fcl * hr * (Tcl - tr)
   C_cl <- fcl * hc * (Tcl - ta)
   ta + (M_w2 - E_sw - E_re - R_cl - C_cl - 58.15) / (hc + hr)
+}
+
+thermos_calc_pmv <- function(ta, tr, v, vp, Met, Clo, ht, mbody) {
+  Adu <- 0.203 * mbody^0.425 * ht^0.725
+  M_w2 <- Met / Adu
+  icl <- Clo * 0.155
+  fcl <- ifelse(icl <= 0.078, 1 + 1.29 * icl, 1.05 + 0.645 * icl)
+  pa <- vp * 100
+
+  tcl <- ta + (35.5 - ta) / (3.5 * (6.45 * icl + 0.1))
+  for (iter in seq_len(10)) {
+    hcf <- pmax(2.38 * abs(tcl - ta)^0.25, 12.1 * sqrt(v))
+    f_val <- tcl - 35.7 + 0.028 * M_w2 +
+      icl * (3.96e-8 * fcl * ((tcl + 273)^4 - (tr + 273)^4) +
+        fcl * hcf * (tcl - ta))
+    f_drv <- 1 + icl * (3.96e-8 * fcl * 4 * (tcl + 273)^3 + fcl * hcf)
+    f_drv[abs(f_drv) < 1e-6] <- 1e-6
+    tcl_next <- tcl - f_val / f_drv
+    if (max(abs(tcl_next - tcl), na.rm = TRUE) < 1e-4) {
+      tcl <- tcl_next
+      break
+    }
+    tcl <- tcl_next
+  }
+
+  hcf <- pmax(2.38 * abs(tcl - ta)^0.25, 12.1 * sqrt(v))
+  hl2 <- ifelse(M_w2 > 58.15, 0.42 * (M_w2 - 58.15), 0)
+  L <- M_w2 - 3.05e-3 * (5733 - 6.99 * M_w2 - pa) -
+    hl2 - 1.7e-5 * M_w2 * (5867 - pa) -
+    0.0014 * M_w2 * (34 - ta) -
+    3.96e-8 * fcl * ((tcl + 273)^4 - (tr + 273)^4) -
+    fcl * hcf * (tcl - ta)
+
+  (0.303 * exp(-0.036 * M_w2) + 0.028) * L
 }
 
 thermos_calc_set <- function(ta, tr, v, rh, M, icl, ht, mbody) {
@@ -287,7 +321,7 @@ thermos_thermal_comfort_one_plot <- function(dem_dir,
     z_target <- 1.1
     va_11m_r <- terra::clamp(va_r * log(z_target / z0_r) / log(z_ref / z0_r), 0.5, 17)
 
-    shadow <- thermos_compute_shadow(dsm, dem, solar_zenith, solar_az)
+    shadow <- thermos_compute_shadow(dsm, dem, solar_zenith, solar_az, observer_height = z_target)
     shd_v <- terra::values(shadow, mat = FALSE)
     shd_v[is.na(dem_vals)] <- NA
     terra::values(shadow) <- shd_v
@@ -319,40 +353,22 @@ thermos_thermal_comfort_one_plot <- function(dem_dir,
     tr_v <- terra::values(Tmrt_C, mat = FALSE)
     rh_v <- terra::values(rh_r, mat = FALSE)
     v_v <- terra::values(va_11m_r, mat = FALSE)
+    v10_v <- terra::values(va_r, mat = FALSE)
     n <- length(ta_v)
-    valid <- !is.na(ta_v) & !is.na(tr_v) & !is.na(v_v) & !is.na(rh_v)
+    valid <- !is.na(ta_v) & !is.na(tr_v) & !is.na(v_v) & !is.na(rh_v) & !is.na(v10_v)
 
     ta <- ta_v[valid]
     tr <- tr_v[valid]
     rh <- rh_v[valid]
     v <- pmax(v_v[valid], 0.1)
+    v10 <- pmax(v10_v[valid], 0.5)
     vp <- rh / 100 * 6.112 * exp(17.67 * ta / (ta + 243.5))
 
-    Adu <- 0.203 * mbody^0.425 * ht^0.725
-    fcl <- 1 + 0.15 * Clo
-    M <- Met / Adu
     icl <- Clo * 0.155
-
-    pa <- vp * 100
-    tcl <- ta + (35.5 - ta) / (3.5 * (6.45 * icl + 0.1))
-    for (iter in seq_len(3)) {
-      hcf <- pmax(2.38 * abs(tcl - ta)^0.25, 12.1 * sqrt(v))
-      f_val <- tcl - 35.7 + 0.0275 * M +
-        icl * (3.96e-8 * fcl * ((tcl + 273)^4 - (tr + 273)^4) +
-          fcl * hcf * (tcl - ta))
-      f_drv <- 1 + icl * (3.96e-8 * fcl * 4 * (tcl + 273)^3 + fcl * hcf)
-      tcl <- tcl - f_val / f_drv
-    }
-    hcf <- pmax(2.38 * abs(tcl - ta)^0.25, 12.1 * sqrt(v))
-    L <- M - 3.05e-3 * (5733 - 6.99 * M - pa) -
-      0.42 * (M - 58.15) - 1.7e-5 * M * (5867 - pa) -
-      0.0014 * M * (34 - ta) -
-      3.96e-8 * fcl * ((tcl + 273)^4 - (tr + 273)^4) -
-      fcl * hcf * (tcl - ta)
-    pmv_tmp <- (0.303 * exp(-0.036 * M) + 0.028) * L
+    pmv_tmp <- thermos_calc_pmv(ta, tr, v, vp, Met, Clo, ht, mbody)
 
     D_Tmrt <- pmin(pmax(tr - ta, -30), 70)
-    v_utci <- pmin(pmax(v, 0.5), 17)
+    v_utci <- pmin(pmax(v10, 0.5), 17)
     pa_utci <- pmin(pmax(vp / 10, 0), 5)
     ta_u <- pmin(pmax(ta, -50), 50)
 

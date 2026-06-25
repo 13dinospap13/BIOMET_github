@@ -20,10 +20,10 @@ thermos_compute_svf_matrix <- function(dsm_r,
     row <- valid_cells[i, 1]
     col <- valid_cells[i, 2]
     h0 <- dem_mat[row, col] + observer_height
-    max_angle <- 0
-    angles_px <- angles + stats::runif(1, 0, angle_step)
+    horizon_angles <- rep(0, length(angles))
 
-    for (az in angles_px) {
+    for (j in seq_along(angles)) {
+      az <- angles[j]
       dx <- sin(az)
       dy <- -cos(az)
       rr <- round(row + dy * steps)
@@ -55,14 +55,11 @@ thermos_compute_svf_matrix <- function(dsm_r,
       }
 
       if (length(h_obs) > 0) {
-        ray_max <- max(atan2(h_obs - h0, r * s))
-        if (ray_max > max_angle) {
-          max_angle <- ray_max
-        }
+        horizon_angles[j] <- max(max(atan2(h_obs - h0, r * s)), 0)
       }
     }
 
-    svf_mat[row, col] <- 1 - sin(max_angle)
+    svf_mat[row, col] <- mean(cos(horizon_angles)^2)
   }
 
   out <- terra::setValues(terra::rast(dsm_r), as.vector(t(svf_mat)))
